@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Wo zum Geier?</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,500..900&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+/* Layout: Vollbild-Panorama, Karte als Dock unten rechts (Desktop) bzw. unten gestapelt (Handy). Einheitlicher dunkler "Vermesser"-Look. */
+:root{
+  --bg:#12161a; --panel:#1c2228; --line:#2e3740; --fg:#e9ece6; --muted:#8e9aa3;
+  --accent:#ffc83d; --target:#4fd18b; --bad:#ff6b5a;
+  --display:"Archivo", "Arial Narrow", system-ui, sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--display);overflow:hidden}
+button,input{font:inherit}
+[hidden]{display:none!important}
+
+/* ---------- Start & Ende ---------- */
+.screen{position:fixed;inset:0;display:grid;place-items:center;overflow:auto;
+  padding-block:24px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  background:radial-gradient(circle at 70% 20%, #1f2a33 0, var(--bg) 60%)}
+.card{width:min(520px,100%);display:grid;gap:20px}
+.eyebrow{font:600 12px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+h1{margin:0;font-weight:900;font-stretch:75%;font-size:clamp(48px,12vw,84px);line-height:.9;text-wrap:balance;text-transform:uppercase}
+h1 span{color:var(--accent)}
+p{margin:0;color:var(--muted)}
+.modes{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.mode{border:1.5px solid var(--line);background:var(--panel);color:var(--fg);border-radius:6px;padding:14px;text-align:left;cursor:pointer;display:grid;gap:2px}
+.mode b{font-size:20px;font-stretch:85%}
+.mode small{color:var(--muted);font:12px var(--mono)}
+.mode[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+details{border-top:1px solid var(--line);padding-top:14px}
+summary{cursor:pointer;color:var(--muted);font:13px var(--mono)}
+details p{font-size:13px;margin-top:10px}
+label{display:block;font:12px var(--mono);color:var(--muted);margin-top:12px}
+input[type=text]{width:100%;margin-top:6px;padding:10px 12px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px}
+.btn{appearance:none;border:0;border-radius:6px;padding:14px 20px;background:var(--accent);color:#1a1405;font-weight:800;font-size:17px;letter-spacing:.02em;cursor:pointer;text-transform:uppercase;font-stretch:85%}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+.btn.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---------- Spiel ---------- */
+#game{position:fixed;inset:0}
+#sv{position:absolute;inset:0;background:#000}
+#sv iframe{width:100%;height:100%;border:0;display:block}
+#cover{position:absolute;top:0;left:0;width:min(330px,80%);height:86px;background:var(--panel);display:flex;align-items:center;
+  padding:0 16px;font:12px var(--mono);color:var(--muted);z-index:3;border-bottom-right-radius:8px}
+.hud{position:absolute;top:calc(12px + env(safe-area-inset-top,0px));right:max(12px,env(safe-area-inset-right,0px));z-index:4;
+  display:flex;gap:6px}
+.chip{background:rgba(18,22,26,.88);border:1px solid var(--line);border-radius:6px;padding:6px 12px;display:grid;line-height:1.15}
+.chip small{font:10px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.chip b{font:600 18px var(--mono);font-variant-numeric:tabular-nums}
+.hud .ghost{padding:6px 12px;font-size:13px;background:rgba(18,22,26,.88)}
+
+#dock{position:absolute;z-index:5;right:max(16px,env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));
+  width:360px;display:grid;gap:8px;transition:width .2s ease}
+#dock:hover,#dock.big{width:min(620px,calc(100vw - 32px))}
+#map{height:240px;border-radius:6px;border:2px solid var(--line);transition:height .2s ease;cursor:crosshair}
+#dock:hover #map,#dock.big #map{height:min(440px,60vh)}
+#guessBtn{width:100%}
+
+#result{position:absolute;inset:auto 0 0 0;z-index:6;background:var(--panel);border-top:2px solid var(--accent);
+  padding-block:16px calc(16px + env(safe-area-inset-bottom,0px));padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  display:flex;flex-wrap:wrap;align-items:center;gap:12px 28px}
+#result .big{font:600 clamp(28px,6vw,44px) var(--mono);font-variant-numeric:tabular-nums;color:var(--accent)}
+#result .quip{flex:1 1 220px;min-width:0;color:var(--fg)}
+.bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:6px;width:200px;max-width:100%}
+.bar i{display:block;height:100%;background:var(--accent);width:0;transition:width .6s ease}
+
+#loading{position:absolute;inset:0;display:grid;place-items:center;z-index:2;font:13px var(--mono);color:var(--muted);background:#000}
+
+.leaflet-container{background:#1b2a33;font-family:var(--display)}
+.pin{width:18px;height:18px;border-radius:50%;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.6)}
+
+/* ---------- Ergebnis ---------- */
+table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:13px;font-variant-numeric:tabular-nums}
+td,th{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left}
+th{color:var(--muted);font-weight:400;font-size:11px;letter-spacing:.1em;text-transform:uppercase}
+td.r,th.r{text-align:right}
+.total{font:600 clamp(40px,10vw,64px) var(--mono);color:var(--accent);line-height:1}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+
+@media (max-width:700px){
+  #sv{bottom:42%}
+  #cover{height:70px}
+  #dock,#dock:hover,#dock.big{left:0;right:0;bottom:0;width:auto;top:58%;padding:8px max(8px,env(safe-area-inset-right,0px)) calc(8px + env(safe-area-inset-bottom,0px)) max(8px,env(safe-area-inset-left,0px));
+    background:var(--bg);grid-template-rows:1fr auto}
+  #map,#dock:hover #map,#dock.big #map{height:100%;min-height:0}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- START -->
+<section class="screen" id="start">
+  <div class="card">
+    <div class="eyebrow">5 Runden · max. 25 000 Punkte</div>
+    <h1>Wo zum <span>Geier?</span></h1>
+    <p>Du wirst irgendwo abgesetzt. Schau dich um, setz einen Pin auf die Karte und finde heraus, wie weit daneben du liegst.</p>
+    <div class="modes" role="group" aria-label="Spielmodus">
+      <button class="mode" data-mode="welt" aria-pressed="true"><b>Welt</b><small>~45 Orte · 5 Kontinente</small></button>
+      <button class="mode" data-mode="de" aria-pressed="false"><b>Deutschland</b><small>~30 Orte · für Lokalpatrioten</small></button>
+    </div>
+    <details id="keyBox">
+      <summary>Google-API-Key (optional, empfohlen)</summary>
+      <p>Ohne Key läuft Street View über das öffentliche Embed. Das zeigt oben links die Adresse an, die wird von einem Balken verdeckt. Mit einem Maps-JavaScript-API-Key gibt es keine Adressanzeige, und Orte ohne Panorama werden automatisch ersetzt. Der Key bleibt nur in diesem Browser.</p>
+      <label for="apiKey">API-Key</label>
+      <input type="text" id="apiKey" placeholder="AIza…" autocomplete="off" spellcheck="false">
+    </details>
+    <button class="btn" id="startBtn">Los geht's</button>
+  </div>
+</section>
+
+<!-- SPIEL -->
+<section id="game" hidden>
+  <div id="sv"><div id="loading">Panorama wird geladen …</div></div>
+  <div id="cover" hidden>Adresse? Netter Versuch.</div>
+  <div class="hud">
+    <div class="chip"><small>Runde</small><b id="hudRound">1/5</b></div>
+    <div class="chip"><small>Punkte</small><b id="hudScore">0</b></div>
+    <button class="btn ghost" id="resetView" title="Zurück zum Startpunkt">↺</button>
+  </div>
+  <div id="dock">
+    <div id="map"></div>
+    <button class="btn" id="guessBtn" disabled>Pin setzen</button>
+  </div>
+  <div id="result" hidden>
+    <div><div class="eyebrow">Daneben um</div><div class="big" id="resKm">0 km</div></div>
+    <div><div class="eyebrow">Punkte</div><div class="big" id="resPts">0</div><div class="bar"><i id="resBar"></i></div></div>
+    <div class="quip" id="resQuip"></div>
+    <button class="btn" id="nextBtn">Nächste Runde</button>
+  </div>
+</section>
+
+<!-- ENDE -->
+<section class="screen" id="end" hidden>
+  <div class="card">
+    <div class="eyebrow" id="endMode">Welt</div>
+    <div class="total" id="endTotal">0</div>
+    <p id="endQuip"></p>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>#</th><th>Ort</th><th class="r">Abstand</th><th class="r">Punkte</th></tr></thead>
+        <tbody id="endRows"></tbody>
+      </table>
+    </div>
+    <div class="row">
+      <button class="btn" id="againBtn">Nochmal</button>
+      <button class="btn ghost" id="menuBtn">Modus wechseln</button>
+    </div>
+  </div>
+</section>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* ===================== Daten ===================== */
+const LOCATIONS = {
+  welt: [
+    ["Paris",48.8698,2.3075],["Rom",41.9009,12.4799],["Tokio",35.6595,139.7005],["New York",40.7580,-73.9790],
+    ["Sydney",-33.8688,151.2069],["Rio de Janeiro",-22.9711,-43.1822],["Kapstadt",-33.9249,18.4241],["Reykjavík",64.1466,-21.9426],
+    ["Buenos Aires",-34.6037,-58.3816],["Mexiko-Stadt",19.4326,-99.1332],["Bangkok",13.7466,100.5393],["Istanbul",41.0082,28.9784],
+    ["Lissabon",38.7139,-9.1394],["Edinburgh",55.9500,-3.1880],["Oslo",59.9139,10.7522],["Vancouver",49.2827,-123.1207],
+    ["San Francisco",37.8021,-122.4187],["Nairobi",-1.2864,36.8172],["Seoul",37.5665,126.9780],["Santiago de Chile",-33.4489,-70.6693],
+    ["Queenstown",-45.0312,168.6626],["Lima",-12.0464,-77.0428],["Dubai",25.1972,55.2744],["Krakau",50.0614,19.9366],
+    ["Amsterdam",52.3731,4.8922],["Barcelona",41.3870,2.1700],["Hongkong",22.2819,114.1580],["Singapur",1.2834,103.8607],
+    ["Kyoto",35.0037,135.7788],["Taipeh",25.0418,121.5079],["Bogotá",4.5981,-74.0758],["Montevideo",-34.9058,-56.1913],
+    ["Toronto",43.6532,-79.3832],["Chicago",41.8826,-87.6233],["Las Vegas",36.1147,-115.1728],["Honolulu",21.2766,-157.8270],
+    ["Anchorage",61.2181,-149.9003],["Ushuaia",-54.8019,-68.3030],["Prag",50.0870,14.4208],["Budapest",47.4979,19.0402],
+    ["Athen",37.9755,23.7348],["Dublin",53.3478,-6.2597],["Helsinki",60.1699,24.9384],["Johannesburg",-26.2041,28.0473],
+    ["Accra",5.5560,-0.1969],["Perth",-31.9523,115.8613],["Auckland",-36.8485,174.7633],["Ulaanbaatar",47.9184,106.9177],
+    ["Tel Aviv",32.0809,34.7806],["Kuala Lumpur",3.1478,101.6953],["Cusco",-13.5163,-71.9785],["Geiranger",62.1008,7.2059],
+    ["Tórshavn",62.0107,-6.7741]
+  ],
+  de: [
+    ["Berlin",52.5163,13.3889],["Hamburg",53.5437,9.9886],["Köln",50.9384,6.9599],["München",48.1590,11.5850],
+    ["Dresden",51.0504,13.7373],["Leipzig",51.3397,12.3731],["Rostock",54.0887,12.1405],["Kiel",54.3233,10.1394],
+    ["Bremen",53.0758,8.8072],["Hannover",52.3744,9.7386],["Frankfurt am Main",50.1109,8.6821],["Stuttgart",48.7784,9.1800],
+    ["Freiburg",47.9959,7.8494],["Nürnberg",49.4521,11.0767],["Regensburg",49.0195,12.0974],["Passau",48.5747,13.4607],
+    ["Garmisch-Partenkirchen",47.4917,11.0955],["Lindau",47.5469,9.6842],["Trier",49.7557,6.6394],["Aachen",50.7753,6.0839],
+    ["Münster",51.9607,7.6261],["Görlitz",51.1528,14.9872],["Erfurt",50.9787,11.0328],["Magdeburg",52.1205,11.6276],
+    ["Westerland (Sylt)",54.9079,8.3105],["Stralsund",54.3091,13.0818],["Cochem",50.1470,7.1667],["Berchtesgaden",47.6317,13.0017],
+    ["Bamberg",49.8917,10.8869],["Saarbrücken",49.2402,6.9969]
+  ]
+};
+const MODES = {
+  welt:{name:"Welt", scale:2000, center:[25,10], zoom:1},
+  de:{name:"Deutschland", scale:120, center:[51.2,10.4], zoom:5}
+};
+const ROUNDS = 5;
+
+/* ===================== Helfer ===================== */
+const $ = s => document.querySelector(s);
+const store = {
+  get(k){ try{ return localStorage.getItem(k) }catch(e){ return null } },
+  set(k,v){ try{ localStorage.setItem(k,v) }catch(e){} }
+};
+function haversine(a,b){
+  const R=6371, toR=x=>x*Math.PI/180;
+  const dLat=toR(b.lat-a.lat), dLng=toR(b.lng-a.lng);
+  const h=Math.sin(dLat/2)**2+Math.cos(toR(a.lat))*Math.cos(toR(b.lat))*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+const fmtKm = d => d<1 ? Math.round(d*1000)+" m" : d<100 ? d.toFixed(1).replace(".",",")+" km" : Math.round(d).toLocaleString("de-DE")+" km";
+const fmtPts = n => n.toLocaleString("de-DE");
+function shuffle(a){ a=[...a]; for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]} return a }
+function quip(d, mode){
+  const s = mode==="de" ? d*15 : d; // in DE strenger bewerten
+  if(s<1) return "Bist du Google? Ehrlich jetzt.";
+  if(s<30) return "Praktisch Nachbarn. Respekt.";
+  if(s<250) return "Richtige Gegend. Der Bäcker würde dich vermutlich erkennen.";
+  if(s<1000) return "Richtiges Land, mit etwas gutem Willen.";
+  if(s<4000) return "Richtiger Kontinent. Immerhin.";
+  return "Hast du den Globus falsch rum gehalten?";
+}
+
+/* ===================== Zustand ===================== */
+let mode = "welt", queue = [], round = 0, total = 0, history = [];
+let target = null, guess = null, locked = false, currentName = "";
+let map, guessMarker, targetMarker, line;
+let gReady = false, gFailed = false, svService, pano;
+
+/* ===================== Karte ===================== */
+function pin(color){ return L.divIcon({className:"", html:`<div class="pin" style="background:${color}"></div>`, iconSize:[18,18], iconAnchor:[9,9]}) }
+function initMap(){
+  map = L.map("map", {worldCopyJump:true, zoomControl:true, attributionControl:true});
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom:18, attribution:"© OpenStreetMap"}).addTo(map);
+  map.on("click", e => {
+    if(locked) return;
+    guess = {lat:e.latlng.lat, lng:L.Util.wrapNum(e.latlng.lng,[-180,180],true)};
+    if(!guessMarker) guessMarker = L.marker(e.latlng,{icon:pin("var(--accent)")}).addTo(map);
+    else guessMarker.setLatLng(e.latlng);
+    $("#guessBtn").disabled = false;
+    $("#guessBtn").textContent = "Raten!";
+  });
+}
+function resetMap(){
+  [guessMarker,targetMarker,line].forEach(l => l && map.removeLayer(l));
+  guessMarker = targetMarker = line = null;
+  map.setView(MODES[mode].center, MODES[mode].zoom);
+  setTimeout(()=>map.invalidateSize(),50);
+}
+
+/* ===================== Street View ===================== */
+function loadGoogle(key){
+  return new Promise(res => {
+    if(!key){ res(false); return }
+    window.gm_authFailure = () => { gFailed = true; gReady = false; useIframe(); };
+    window.__gmInit = () => {
+      svService = new google.maps.StreetViewService();
+      res(true);
+    };
+    const s = document.createElement("script");
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&callback=__gmInit&v=weekly`;
+    s.async = true; s.onerror = () => res(false);
+    document.head.appendChild(s);
+  });
+}
+function showLoading(on){ $("#loading").hidden = !on }
+
+function loadPanoGoogle(loc, radius=5000){
+  showLoading(true);
+  svService.getPanorama({location:{lat:loc[1],lng:loc[2]}, radius, source:google.maps.StreetViewSource.OUTDOOR, preference:google.maps.StreetViewPreference.NEAREST},
+    (data, status) => {
+      if(status !== "OK"){
+        if(radius < 50000) return loadPanoGoogle(loc, 50000);
+        const spare = queue.pop(); // Ersatzort
+        return spare ? (currentName = spare[0], loadPanoGoogle(spare)) : useIframe();
+      }
+      if(!pano){
+        const box = document.createElement("div"); box.style.cssText = "position:absolute;inset:0";
+        $("#sv").appendChild(box);
+        pano = new google.maps.StreetViewPanorama(box, {addressControl:false, showRoadLabels:false, fullscreenControl:false, motionTracking:false, motionTrackingControl:false, enableCloseButton:false, zoomControl:true});
+      }
+      pano.setPano(data.location.pano);
+      pano.setPov({heading:Math.random()*360, pitch:0}); pano.setZoom(0);
+      pano.__start = data.location.pano;
+      target = {lat:data.location.latLng.lat(), lng:data.location.latLng.lng()};
+      showLoading(false);
+    });
+}
+function loadPanoIframe(loc){
+  showLoading(true);
+  $("#cover").hidden = false;
+  let f = $("#sv iframe");
+  if(!f){ f = document.createElement("iframe"); f.setAttribute("allowfullscreen",""); f.referrerPolicy="no-referrer-when-downgrade"; $("#sv").appendChild(f); f.onload = () => showLoading(false); }
+  const h = Math.round(Math.random()*360);
+  f.src = `https://www.google.com/maps?layer=c&cbll=${loc[1]},${loc[2]}&cbp=12,${h},0,0,0&output=svembed`;
+  target = {lat:loc[1], lng:loc[2]};
+}
+function useIframe(){ gReady = false; if(pano){ pano.setVisible(false) } if(round>0 && !locked) loadPanoIframe([currentName, target?.lat ?? 0, target?.lng ?? 0]) }
+
+/* ===================== Ablauf ===================== */
+async function startGame(){
+  const key = $("#apiKey").value.trim();
+  store.set("wzg-key", key);
+  if(key && !gReady && !gFailed && !window.google) gReady = await loadGoogle(key);
+  queue = shuffle(LOCATIONS[mode]);
+  round = 0; total = 0; history = [];
+  $("#start").hidden = true; $("#end").hidden = true; $("#game").hidden = false;
+  if(!map) initMap();
+  nextRound();
+}
+function nextRound(){
+  round++;
+  locked = false; guess = null;
+  $("#result").hidden = true; $("#dock").hidden = false; $("#dock").classList.remove("big");
+  $("#guessBtn").disabled = true; $("#guessBtn").textContent = "Pin setzen";
+  $("#hudRound").textContent = `${round}/${ROUNDS}`;
+  $("#hudScore").textContent = fmtPts(total);
+  resetMap();
+  const loc = queue.shift();
+  currentName = loc[0];
+  if(gReady && !gFailed) loadPanoGoogle(loc); else loadPanoIframe(loc);
+}
+function doGuess(){
+  if(!guess || locked || !target) return;
+  locked = true;
+  const d = haversine(guess, target);
+  const pts = d < 0.05 ? 5000 : Math.round(5000*Math.exp(-d/MODES[mode].scale));
+  total += pts;
+  history.push({name:currentName, d, pts});
+
+  targetMarker = L.marker([target.lat,target.lng],{icon:pin("var(--target)")}).addTo(map).bindTooltip(currentName,{permanent:true,direction:"top",offset:[0,-10]});
+  line = L.polyline([[guess.lat,guess.lng],[target.lat,target.lng]],{color:"#ffc83d",weight:2,dashArray:"6 6"}).addTo(map);
+  $("#dock").classList.add("big");
+  $("#guessBtn").disabled = true;
+  setTimeout(()=>{ map.invalidateSize(); map.fitBounds(line.getBounds(),{padding:[40,40],maxZoom:14}) },220);
+
+  $("#resKm").textContent = fmtKm(d);
+  $("#resPts").textContent = fmtPts(pts);
+  $("#resQuip").textContent = `${currentName}. ${quip(d, mode)}`;
+  $("#resBar").style.width = "0";
+  $("#hudScore").textContent = fmtPts(total);
+  $("#nextBtn").textContent = round < ROUNDS ? "Nächste Runde" : "Auswertung";
+  $("#result").hidden = false;
+  requestAnimationFrame(()=> $("#resBar").style.width = (pts/50)+"%");
+}
+function endGame(){
+  $("#game").hidden = true; $("#end").hidden = false;
+  $("#endMode").textContent = `${MODES[mode].name} · von 25 000`;
+  $("#endTotal").textContent = fmtPts(total);
+  const avg = history.reduce((s,h)=>s+h.d,0)/history.length;
+  $("#endQuip").textContent =
+    total > 22000 ? "Verdächtig gut. Hast du da nebenbei Google offen?" :
+    total > 15000 ? "Solide. Du darfst beim nächsten Roadtrip navigieren." :
+    total > 8000  ? `Im Schnitt ${fmtKm(avg)} daneben. Ausbaufähig, aber ehrlich.` :
+                    `Im Schnitt ${fmtKm(avg)} daneben. Wir reden lieber nicht drüber.`;
+  $("#endRows").innerHTML = history.map((h,i)=>`<tr><td>${i+1}</td><td>${h.name}</td><td class="r">${fmtKm(h.d)}</td><td class="r">${fmtPts(h.pts)}</td></tr>`).join("");
+}
+
+/* ===================== Events ===================== */
+document.querySelectorAll(".mode").forEach(b => b.addEventListener("click", () => {
+  mode = b.dataset.mode;
+  document.querySelectorAll(".mode").forEach(x => x.setAttribute("aria-pressed", x===b ? "true":"false"));
+}));
+$("#startBtn").addEventListener("click", startGame);
+$("#guessBtn").addEventListener("click", doGuess);
+$("#nextBtn").addEventListener("click", () => round < ROUNDS ? nextRound() : endGame());
+$("#againBtn").addEventListener("click", startGame);
+$("#menuBtn").addEventListener("click", () => { $("#end").hidden = true; $("#start").hidden = false; });
+$("#resetView").addEventListener("click", () => {
+  if(gReady && pano && pano.__start){ pano.setPano(pano.__start); pano.setPov({heading:0,pitch:0}); }
+  else { const f = $("#sv iframe"); if(f) f.src = f.src; }
+});
+document.addEventListener("keydown", e => {
+  if($("#game").hidden || e.target.tagName === "INPUT") return;
+  if(e.code === "Space" || e.code === "Enter"){
+    e.preventDefault();
+    if(!locked) doGuess(); else $("#nextBtn").click();
+  }
+});
+const savedKey = store.get("wzg-key");
+if(savedKey){ $("#apiKey").value = savedKey; $("#keyBox").open = true; }
+</script>
+</body>
+</html>
