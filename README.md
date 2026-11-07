@@ -12,6 +12,7 @@ Das Spiel ist eine einzige statische Datei (`index.html`), ohne Build-Schritt.
 ## Starten mit Docker
 
 ```bash
+git clone https://github.com/Knoxville4444/wozumgeier && cd wozumgeier
 docker compose up -d --build
 ```
 
